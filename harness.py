@@ -156,6 +156,10 @@ def send_telegram(text: str) -> str:
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return "Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)."
+    # If a published dashboard URL is configured, append it as a tappable link.
+    url = os.environ.get("DASHBOARD_URL")
+    if url:
+        text = f"{text}\n\n📊 Full dashboard: {url}"
     payload = {"chat_id": chat_id, "text": text[:4096], "disable_web_page_preview": True}
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
