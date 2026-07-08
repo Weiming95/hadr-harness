@@ -1,6 +1,7 @@
 name: HADR morning briefing
 
-# Runs the harness once a day and publishes a situation dashboard.
+# Runs the harness once a day: assess the feeds, message a briefing to Telegram,
+# and publish the dashboard to GitHub Pages.
 on:
   schedule:
     # GitHub cron is UTC. 08:30 Singapore (UTC+8) == 00:30 UTC.
@@ -9,8 +10,11 @@ on:
     - cron: "30 0 * * *"
   workflow_dispatch: {}   # lets you run it on demand from the Actions tab
 
+# Pages deploy needs pages:write + id-token:write; contents:read is enough else.
 permissions:
-  contents: read          # briefing goes to Telegram + an artifact; no commits
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: morning-briefing
@@ -19,6 +23,9 @@ concurrency:
 jobs:
   briefing:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,14 +39,27 @@ jobs:
           OPENCODE_MODEL: kimi-k2.7-code
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Stable Pages URL — send_telegram appends it to the briefing. The page
+          # is (re)published by the deploy step below moments later.
+          DASHBOARD_URL: https://weiming95.github.io/hadr-harness/
         run: |
           python3 harness.py --once \
             "Fetch USGS and GDACS, assess the current worldwide disaster picture, call write_dashboard to save a morning situation report of the most serious events, and call send_telegram with a concise plain-text briefing of them. Then summarise in one paragraph."
 
-      - name: Upload dashboard as an artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Assemble the Pages site
+        run: |
+          mkdir -p site
+          if [ -f dashboard.html ]; then
+            cp dashboard.html site/index.html
+          else
+            echo "<!doctype html><meta charset=utf-8><title>HADR</title><h1>No briefing produced this run.</h1>" > site/index.html
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: dashboard
-          path: dashboard.html
-          if-no-files-found: warn
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
