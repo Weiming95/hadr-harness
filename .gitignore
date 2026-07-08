@@ -1,0 +1,12 @@
+# Never commit secrets. The key lives in the macOS Keychain or an env var —
+# not in the repo. These patterns are a backstop in case one lands on disk.
+.env
+.env.*
+!.env.example
+*.key
+key.txt
+secrets*
+
+# Generated output
+dashboard.html
+__pycache__/
