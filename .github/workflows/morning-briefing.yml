@@ -30,9 +30,11 @@ jobs:
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_MODEL: kimi-k2.7-code
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python3 harness.py --once \
-            "Fetch USGS and GDACS, assess the current worldwide disaster picture, and call write_dashboard to save a morning situation report of the most serious events. Then summarise in one paragraph."
+            "Fetch USGS and GDACS, assess the current worldwide disaster picture, call write_dashboard to save a morning situation report of the most serious events, and call send_telegram with a concise plain-text briefing of them. Then summarise in one paragraph."
 
       - name: Upload dashboard as an artifact
         if: always()

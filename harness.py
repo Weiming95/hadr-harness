@@ -150,6 +150,26 @@ def _esc(s) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def send_telegram(text: str) -> str:
+    """Send a plain-text message to the configured Telegram chat."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return "Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)."
+    payload = {"chat_id": chat_id, "text": text[:4096], "disable_web_page_preview": True}
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=json.dumps(payload).encode(),
+        headers={"content-type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=SSL_CTX) as r:
+            r.read()
+        return f"Sent Telegram message ({len(text)} chars) to chat {chat_id}."
+    except urllib.error.HTTPError as e:
+        return f"Telegram send failed ({e.code}): {e.read().decode()[:200]}"
+
+
 # Tool schemas the model sees (OpenAI function-calling format).
 def _fn(name, description, properties, required):
     return {
@@ -171,8 +191,14 @@ TOOLS = [
              "severity": {"type": "string"}, "headline": {"type": "string"},
              "location": {"type": "string"}, "assessment": {"type": "string"}}}}},
         ["title", "events"]),
+    _fn("send_telegram", "Send a concise plain-text briefing to the duty officer's Telegram chat.",
+        {"text": {"type": "string"}}, ["text"]),
 ]
-DISPATCH = {"fetch_feed": fetch_feed, "write_dashboard": write_dashboard}
+DISPATCH = {
+    "fetch_feed": fetch_feed,
+    "write_dashboard": write_dashboard,
+    "send_telegram": send_telegram,
+}
 
 
 # A browser-like User-Agent: the endpoint sits behind Cloudflare, which blocks
@@ -270,8 +296,9 @@ def main():
 # Non-interactive: run one prompt and exit. This is what the 08:30 cron calls.
 DEFAULT_PROMPT = (
     "Fetch the USGS and GDACS feeds, assess the current worldwide disaster picture, "
-    "and call write_dashboard to save a morning situation report of the most serious "
-    "events. Then give a one-paragraph summary."
+    "call write_dashboard to save a morning situation report of the most serious events, "
+    "and call send_telegram with a concise plain-text briefing of them. "
+    "Then give a one-paragraph summary."
 )
 
 
@@ -296,9 +323,33 @@ def list_models():
     print("Available Go models — set one as OPENCODE_MODEL:\n  " + "\n  ".join(ids or ["(none returned)"]))
 
 
+def telegram_chat_ids():
+    """Print chat ids from recent messages, so you can find TELEGRAM_CHAT_ID.
+    First send your bot a message (any text), then run this."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
+        sys.exit("Set TELEGRAM_BOT_TOKEN first (in .env), then send your bot a message.")
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/getUpdates")
+    with urllib.request.urlopen(req, timeout=20, context=SSL_CTX) as r:
+        data = json.loads(r.read().decode())
+    chats = {}
+    for upd in data.get("result", []):
+        chat = (upd.get("message") or upd.get("channel_post") or {}).get("chat", {})
+        if chat.get("id"):
+            chats[chat["id"]] = chat.get("username") or chat.get("title") or chat.get("first_name", "")
+    if not chats:
+        print("No chats found. Send your bot a message first (open it and type /start), then re-run.")
+        return
+    print("Chats that have messaged your bot — set one as TELEGRAM_CHAT_ID:")
+    for cid, who in chats.items():
+        print(f"  {cid}  ({who})")
+
+
 if __name__ == "__main__":
     if "--models" in sys.argv:
         list_models()
+    elif "--tg-updates" in sys.argv:
+        telegram_chat_ids()
     elif "--once" in sys.argv:
         i = sys.argv.index("--once")
         run_once(" ".join(sys.argv[i + 1:]).strip())
