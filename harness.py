@@ -261,6 +261,7 @@ def converse(messages: list, user: str) -> None:
                 out = fn(**args) if fn else f"unknown tool {name}"
             except Exception as ex:  # noqa: BLE001 — surface any failure to the model
                 out = f"tool error: {ex}"
+            print(f"    └─ {str(out)[:120]}")  # echo the result (useful in CI logs)
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": str(out)})
 
 
