@@ -21,6 +21,7 @@ import subprocess
 import sys
 import urllib.request
 import urllib.error
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 
@@ -126,28 +127,130 @@ def fetch_feed(feed: str) -> str:
 
 
 def write_dashboard(title: str, events: list, path: str = "dashboard.html") -> str:
-    """Save an HTML page of assessed events."""
-    rows = "\n".join(
-        f"<tr><td>{_esc(e.get('severity',''))}</td>"
-        f"<td>{_esc(e.get('headline',''))}</td>"
-        f"<td>{_esc(e.get('location',''))}</td>"
-        f"<td>{_esc(e.get('assessment',''))}</td></tr>"
-        for e in events
+    """Save a styled HTML situation-report page of assessed events."""
+    now = datetime.now(timezone.utc)
+    sgt = now.astimezone(timezone(timedelta(hours=8)))
+    generated = now.strftime("%d %b %Y, %H:%M UTC") + " · " + sgt.strftime("%H:%M SGT")
+    n = len(events)
+    cards = "\n".join(_event_card(e) for e in events) or (
+        '<p class="empty">✓ All quiet — no significant events to report.</p>'
     )
-    html = (
-        f"<!doctype html><meta charset=utf-8><title>{_esc(title)}</title>"
-        "<style>body{font:15px system-ui;margin:2rem}"
-        "table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.4rem .6rem}</style>"
-        f"<h1>{_esc(title)}</h1><table><tr><th>Severity</th><th>Event</th>"
-        f"<th>Location</th><th>Assessment</th></tr>{rows}</table>"
+    html = _DASHBOARD_TEMPLATE.format(
+        title=_esc(title) or "HADR Situation Report",
+        count=n,
+        noun="event" if n == 1 else "events",
+        generated=_esc(generated),
+        cards=cards,
+        style=_DASHBOARD_STYLE,
     )
     out = HERE / path
     out.write_text(html)
-    return f"Wrote {len(events)} events to {out}"
+    return f"Wrote {n} events to {out}"
+
+
+def _event_card(e: dict) -> str:
+    sev = e.get("severity", "")
+    cls = _severity_class(sev)
+    loc = e.get("location", "")
+    return (
+        f'<article class="card sev-{cls}">'
+        f'<div class="card-head">'
+        f'<span class="pill pill-{cls}">{_esc(sev) or "—"}</span>'
+        f'{f"<span class=loc>📍 {_esc(loc)}</span>" if loc else ""}'
+        f"</div>"
+        f'<h2 class="headline">{_esc(e.get("headline", "Untitled event"))}</h2>'
+        f'<p class="assess">{_esc(e.get("assessment", ""))}</p>'
+        f"</article>"
+    )
+
+
+def _severity_class(text: str) -> str:
+    """Map a free-text severity ('Red alert', 'M 5.8', 'Green GDACS') to a colour."""
+    t = (text or "").lower()
+    if "red" in t:
+        return "red"
+    if "orange" in t:
+        return "orange"
+    if "green" in t:
+        return "green"
+    return "info"
 
 
 def _esc(s) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+_DASHBOARD_STYLE = """
+:root{
+  --bg:#f4f6f9; --panel:#fff; --ink:#1a2230; --muted:#5b6675; --line:#e4e8ef;
+  --shadow:0 1px 3px rgba(20,30,50,.06),0 8px 24px rgba(20,30,50,.06);
+  --red:#e5484d; --orange:#e08600; --green:#2f9e60; --info:#3b7dd8;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#0c1017; --panel:#141a24; --ink:#e6edf6; --muted:#93a1b5;
+    --line:#222c3a; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+    --red:#ff6169; --orange:#f0a33a; --green:#40c07a; --info:#5aa0ff; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:780px;margin:0 auto;padding:2.2rem 1.1rem 3rem}
+.brand{display:inline-flex;align-items:center;gap:.5rem;font-size:.72rem;font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 0 0 var(--green);animation:pulse 2.4s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(47,158,96,.5)}70%{box-shadow:0 0 0 8px rgba(47,158,96,0)}100%{box-shadow:0 0 0 0 rgba(47,158,96,0)}}
+h1{margin:.5rem 0 .3rem;font-size:1.85rem;line-height:1.15;letter-spacing:-.02em}
+.meta{margin:0 0 1.8rem;color:var(--muted);font-size:.9rem}
+.meta b{color:var(--ink)}
+.grid{display:flex;flex-direction:column;gap:.85rem}
+.card{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--info);
+  border-radius:12px;padding:1rem 1.15rem;box-shadow:var(--shadow);transition:transform .12s ease}
+.card:hover{transform:translateY(-2px)}
+.card.sev-red{border-left-color:var(--red)}
+.card.sev-orange{border-left-color:var(--orange)}
+.card.sev-green{border-left-color:var(--green)}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;margin-bottom:.4rem}
+.pill{font-size:.7rem;font-weight:700;letter-spacing:.03em;padding:.2rem .55rem;border-radius:999px;
+  text-transform:uppercase;white-space:nowrap}
+.pill-red{background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
+.pill-orange{background:color-mix(in srgb,var(--orange) 18%,transparent);color:var(--orange)}
+.pill-green{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
+.pill-info{background:color-mix(in srgb,var(--info) 15%,transparent);color:var(--info)}
+.loc{font-size:.82rem;color:var(--muted)}
+.headline{margin:.15rem 0 .35rem;font-size:1.12rem;line-height:1.3}
+.assess{margin:0;color:var(--muted);font-size:.95rem}
+.empty{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:2rem;text-align:center;color:var(--muted)}
+footer{margin-top:2.2rem;padding-top:1.2rem;border-top:1px solid var(--line);
+  color:var(--muted);font-size:.8rem;text-align:center}
+""".strip()
+
+
+_DASHBOARD_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>{style}</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="dot"></span> HADR Monitor</div>
+    <h1>{title}</h1>
+    <p class="meta"><b>{count}</b> {noun} · {generated}</p>
+  </header>
+  <main class="grid">
+{cards}
+  </main>
+  <footer>Auto-generated by the HADR harness · sources: USGS &amp; GDACS · times UTC / SGT</footer>
+</div>
+</body>
+</html>
+"""
 
 
 def send_telegram(text: str) -> str:
