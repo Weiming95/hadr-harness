@@ -1,0 +1,60 @@
+name: HADR morning briefing
+
+# Runs the harness once a day and publishes a situation dashboard.
+on:
+  schedule:
+    # GitHub cron is UTC. 08:30 Singapore (UTC+8) == 00:30 UTC.
+    # (Scheduled runs can lag a few minutes under load, and pause after ~60
+    #  days of no repo activity — push or re-enable to keep them alive.)
+    - cron: "30 0 * * *"
+  workflow_dispatch: {}   # lets you run it on demand from the Actions tab
+
+permissions:
+  contents: write         # needed to commit dashboard.html back to the repo
+
+concurrency:
+  group: morning-briefing
+  cancel-in-progress: false
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run the harness (one shot)
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENCODE_MODEL: kimi-k2.7-code
+        run: |
+          python3 harness.py --once \
+            "Fetch USGS and GDACS, assess the current worldwide disaster picture, and call write_dashboard to save a morning situation report of the most serious events. Then summarise in one paragraph."
+
+      - name: Upload dashboard as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard
+          path: dashboard.html
+          if-no-files-found: warn
+
+      - name: Commit dashboard back to the repo
+        run: |
+          if [ ! -f dashboard.html ]; then
+            echo "No dashboard.html produced — skipping commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # dashboard.html is gitignored for local runs, so force-add it here.
+          git add -f dashboard.html
+          if git diff --cached --quiet; then
+            echo "No change in dashboard.html — nothing to commit."
+          else
+            git commit -m "chore: morning briefing $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi

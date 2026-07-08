@@ -210,18 +210,52 @@ def call_model(messages: list) -> dict:
     return data["choices"][0]["message"]
 
 
-# --- Levels 1 & 4: the loop --------------------------------------------------
-def main():
+# --- Levels 3 & 4: one full agent turn (run tools until the model is done) ---
+def converse(messages: list, user: str) -> None:
+    messages.append({"role": "user", "content": user})
+    # Level 4: keep going while the model keeps requesting tools.
+    while True:
+        msg = call_model(messages)
+        messages.append(msg)  # append the assistant turn verbatim (incl. tool_calls)
+
+        if msg.get("content"):
+            print(f"\nassistant> {msg['content']}\n")
+
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
+            return  # the model is done for this turn
+
+        # Level 3: run each requested tool, feed the result back in.
+        for tc in tool_calls:
+            name = tc["function"]["name"]
+            args = json.loads(tc["function"].get("arguments") or "{}")
+            fn = DISPATCH.get(name)
+            print(f"  [tool] {name}({json.dumps(args)[:80]})")
+            try:
+                out = fn(**args) if fn else f"unknown tool {name}"
+            except Exception as ex:  # noqa: BLE001 — surface any failure to the model
+                out = f"tool error: {ex}"
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": str(out)})
+
+
+def _require_config():
     if not API_KEY:
         sys.exit("No API key found. Store it in the Keychain:\n"
                  "  security add-generic-password -a \"$USER\" -s opencode-go -w\n"
-                 "or export OPENCODE_API_KEY. See README.md ('Where to put your key').")
+                 "or set OPENCODE_API_KEY / .env. See README.md ('Where to put your key').")
     if not MODEL:
         sys.exit("Set OPENCODE_MODEL to a Go model id. Run `python3 harness.py --models` to list them.")
 
-    # Level 1: the conversation IS this list, resent every turn.
-    # Level 2: the system prompt is the first message.
-    messages = [{"role": "system", "content": SYSTEM}] if SYSTEM else []
+
+def _fresh_messages():
+    # Level 1: the conversation IS this list. Level 2: system prompt goes first.
+    return [{"role": "system", "content": SYSTEM}] if SYSTEM else []
+
+
+# --- Level 1: the interactive loop -------------------------------------------
+def main():
+    _require_config()
+    messages = _fresh_messages()
     print(f"HADR harness ({MODEL}) — ask me to check feeds and build a dashboard. Ctrl-C to quit.\n")
     while True:
         try:
@@ -229,33 +263,22 @@ def main():
         except (EOFError, KeyboardInterrupt):
             print()
             break
-        if not user:
-            continue
-        messages.append({"role": "user", "content": user})
+        if user:
+            converse(messages, user)
 
-        # Level 4: keep going while the model keeps requesting tools.
-        while True:
-            msg = call_model(messages)
-            messages.append(msg)  # append the assistant turn verbatim (incl. tool_calls)
 
-            if msg.get("content"):
-                print(f"\nassistant> {msg['content']}\n")
+# Non-interactive: run one prompt and exit. This is what the 08:30 cron calls.
+DEFAULT_PROMPT = (
+    "Fetch the USGS and GDACS feeds, assess the current worldwide disaster picture, "
+    "and call write_dashboard to save a morning situation report of the most serious "
+    "events. Then give a one-paragraph summary."
+)
 
-            tool_calls = msg.get("tool_calls") or []
-            if not tool_calls:
-                break  # the model is done; hand control back to the human
 
-            # Level 3: run each requested tool, feed the result back in.
-            for tc in tool_calls:
-                name = tc["function"]["name"]
-                args = json.loads(tc["function"].get("arguments") or "{}")
-                fn = DISPATCH.get(name)
-                print(f"  [tool] {name}({json.dumps(args)[:80]})")
-                try:
-                    out = fn(**args) if fn else f"unknown tool {name}"
-                except Exception as ex:  # noqa: BLE001 — surface any failure to the model
-                    out = f"tool error: {ex}"
-                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": str(out)})
+def run_once(prompt: str) -> None:
+    _require_config()
+    print(f"[once] {MODEL}: {prompt}\n")
+    converse(_fresh_messages(), prompt or DEFAULT_PROMPT)
 
 
 def list_models():
@@ -276,5 +299,8 @@ def list_models():
 if __name__ == "__main__":
     if "--models" in sys.argv:
         list_models()
+    elif "--once" in sys.argv:
+        i = sys.argv.index("--once")
+        run_once(" ".join(sys.argv[i + 1:]).strip())
     else:
         main()
