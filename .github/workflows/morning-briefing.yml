@@ -4,10 +4,9 @@ name: HADR morning briefing
 # and publish the dashboard to GitHub Pages.
 on:
   schedule:
-    # GitHub cron is UTC. 08:30 Singapore (UTC+8) == 00:30 UTC.
-    # (Scheduled runs can lag a few minutes under load, and pause after ~60
-    #  days of no repo activity — push or re-enable to keep them alive.)
-    - cron: "30 0 * * *"
+    # TEMPORARY: every 20 min to confirm GitHub's scheduler fires at all.
+    # Revert to the daily 08:30 SGT slot (`30 0 * * *`) once verified.
+    - cron: "*/20 * * * *"
   workflow_dispatch: {}   # lets you run it on demand from the Actions tab
 
 # Pages deploy needs pages:write + id-token:write; contents:read is enough else.
