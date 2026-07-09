@@ -3,9 +3,10 @@
 [![morning briefing](https://github.com/Weiming95/hadr-harness/actions/workflows/morning-briefing.yml/badge.svg)](https://github.com/Weiming95/hadr-harness/actions/workflows/morning-briefing.yml)
 
 Build the thing you've been *using*. This is a minimal agent **harness**: a chat
-loop, a system prompt, three tools, and an agent loop — with the model swappable
+loop, a system prompt, four tools, and an agent loop — with the model swappable
 inside it. It watches the same HADR feeds as the main project (USGS, GDACS),
-assesses them, saves a dashboard, and messages a briefing to Telegram. It shares
+assesses them, saves a dashboard, messages a briefing to Telegram, and can draft
+civilian emergency broadcasts. It shares
 no code with the main project: separate repo, Python standard library only, no
 `pip install` required.
 
@@ -192,6 +193,15 @@ phone, showing that adding a capability is just another entry in `TOOLS` +
 (`--once`), so "an agent on a cron" is nothing more than the loop with no human
 at the keyboard.
 
+**Level 7 (bonus): a fourth tool** — `draft_broadcast` turns the assessed
+situation into ready-to-send civilian alerts. The model drafts each message (a
+~30s radio script, a ≤160-char SMS, a PA announcement — in any language); the
+tool saves them as a `broadcast.html` action sheet **and** pushes a plain-text
+copy to the duty officer's Telegram chat for approval and relay (reusing the
+same `_tg_post` delivery path as `send_telegram`). It's the same
+one-entry-in-`TOOLS`-plus-`DISPATCH` move again — now serving a *second* reader
+(civilians in the affected area) off the picture the harness already built.
+
 ## How it relates to the main HADR project
 
 Same problem, opposite architecture — on purpose:
@@ -200,7 +210,7 @@ Same problem, opposite architecture — on purpose:
   deterministic pipeline (ingest → normalize → correlate → project → score →
   publish) that's replayable and testable.
 - **This harness** puts the model *in charge*: it decides when to call
-  `fetch_feed`, `write_dashboard`, and `send_telegram`.
+  `fetch_feed`, `write_dashboard`, `send_telegram`, and `draft_broadcast`.
 
 `fetch_feed` points at the same live endpoints documented in
 `hadr-project/feeds/` — the shared thing is the data and the domain
@@ -208,12 +218,13 @@ understanding, not the codebase.
 
 ## Files
 
-- `harness.py` — the whole harness (stdlib only): the loop, three tools, and the
+- `harness.py` — the whole harness (stdlib only): the loop, four tools, and the
   `--once` / `--models` / `--tg-updates` entry points.
 - `system_prompt.md` — the standing orders (Level 2). Edit freely.
 - `.env.example` — template for local config (copy to `.env`, which is gitignored).
 - `.github/workflows/morning-briefing.yml` — the 08:30 SGT scheduled run.
 - `dashboard.html` — produced by `write_dashboard` (gitignored; not committed).
+- `broadcast.html` — produced by `draft_broadcast` (gitignored; not committed).
 
 ## Troubleshooting
 
