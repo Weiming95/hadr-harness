@@ -253,16 +253,14 @@ _DASHBOARD_TEMPLATE = """<!doctype html>
 """
 
 
-def send_telegram(text: str) -> str:
-    """Send a plain-text message to the configured Telegram chat."""
+def _tg_post(text: str) -> str:
+    """Low-level: POST one plain-text message to the configured Telegram chat.
+    Shared by `send_telegram` (the briefing) and `draft_broadcast` (civilian
+    alerts) so both deliver the same way."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return "Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)."
-    # If a published dashboard URL is configured, append it as a tappable link.
-    url = os.environ.get("DASHBOARD_URL")
-    if url:
-        text = f"{text}\n\n📊 Full dashboard: {url}"
     payload = {"chat_id": chat_id, "text": text[:4096], "disable_web_page_preview": True}
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
@@ -275,6 +273,94 @@ def send_telegram(text: str) -> str:
         return f"Sent Telegram message ({len(text)} chars) to chat {chat_id}."
     except urllib.error.HTTPError as e:
         return f"Telegram send failed ({e.code}): {e.read().decode()[:200]}"
+
+
+def send_telegram(text: str) -> str:
+    """Send a plain-text briefing to the configured Telegram chat."""
+    # If a published dashboard URL is configured, append it as a tappable link.
+    url = os.environ.get("DASHBOARD_URL")
+    if url:
+        text = f"{text}\n\n📊 Full dashboard: {url}"
+    return _tg_post(text)
+
+
+def draft_broadcast(hazard: str, area: str, messages: list,
+                    path: str = "broadcast.html") -> str:
+    """Turn the assessed situation into ready-to-send civilian alerts.
+
+    The model drafts each message (a ~30s radio script, a ≤160-char SMS, a PA
+    announcement — in any language); this tool saves them as an HTML action
+    sheet AND pushes a plain-text copy to the duty officer's Telegram chat for
+    approval and relay. `messages` is a list of {channel, language, text}.
+    """
+    now = datetime.now(timezone.utc)
+    sgt = now.astimezone(timezone(timedelta(hours=8)))
+    generated = now.strftime("%d %b %Y, %H:%M UTC") + " · " + sgt.strftime("%H:%M SGT")
+    blocks = "\n".join(_broadcast_block(m) for m in messages) or (
+        '<p class="empty">No broadcast messages drafted.</p>'
+    )
+    html = _BROADCAST_TEMPLATE.format(
+        hazard=_esc(hazard) or "Civilian Emergency Broadcast",
+        area=_esc(area),
+        generated=_esc(generated),
+        blocks=blocks,
+        style=_DASHBOARD_STYLE,
+    )
+    out = HERE / path
+    out.write_text(html)
+    # Plain-text digest for Telegram (no markdown — matches send_telegram style).
+    lines = [f"📢 CIVILIAN BROADCAST — {hazard}", f"Area: {area}", ""]
+    for m in messages:
+        channel = str(m.get("channel", "")).upper() or "MESSAGE"
+        lang = m.get("language", "")
+        lines.append(f"— {channel}{f' ({lang})' if lang else ''} —")
+        lines.append(str(m.get("text", "")).strip())
+        lines.append("")
+    tg = _tg_post("\n".join(lines).strip())
+    return f"Wrote {len(messages)} broadcast message(s) to {out}. Telegram: {tg}"
+
+
+def _broadcast_block(m: dict) -> str:
+    channel = str(m.get("channel", ""))
+    lang = m.get("language", "")
+    text = str(m.get("text", ""))
+    meta = _esc(channel.upper()) if channel else "MESSAGE"
+    if lang:
+        meta += f" · {_esc(lang)}"
+    return (
+        f'<article class="card sev-info">'
+        f'<div class="card-head">'
+        f'<span class="pill pill-info">{meta}</span>'
+        f'<span class="loc">{len(text)} chars</span>'
+        f"</div>"
+        f'<p class="assess" style="white-space:pre-wrap;color:var(--ink)">{_esc(text)}</p>'
+        f"</article>"
+    )
+
+
+_BROADCAST_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{hazard} — Civilian Broadcast</title>
+<style>{style}</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="dot"></span> HADR Monitor · Civilian Broadcast</div>
+    <h1>{hazard}</h1>
+    <p class="meta"><b>{area}</b> · {generated}</p>
+  </header>
+  <main class="grid">
+{blocks}
+  </main>
+  <footer>Draft civilian alerts — duty officer to approve before release · times UTC / SGT</footer>
+</div>
+</body>
+</html>
+"""
 
 
 # Tool schemas the model sees (OpenAI function-calling format).
@@ -300,11 +386,23 @@ TOOLS = [
         ["title", "events"]),
     _fn("send_telegram", "Send a concise plain-text briefing to the duty officer's Telegram chat.",
         {"text": {"type": "string"}}, ["text"]),
+    _fn("draft_broadcast",
+        "Draft civilian emergency alerts (radio script, SMS, PA announcement) from the assessed "
+        "situation, save them as an HTML action sheet, and push a plain-text copy to the duty "
+        "officer's Telegram chat for approval and relay.",
+        {"hazard": {"type": "string"},
+         "area": {"type": "string"},
+         "messages": {"type": "array", "items": {"type": "object", "properties": {
+             "channel": {"type": "string", "enum": ["radio", "sms", "pa", "social"]},
+             "language": {"type": "string"},
+             "text": {"type": "string"}}}}},
+        ["hazard", "area", "messages"]),
 ]
 DISPATCH = {
     "fetch_feed": fetch_feed,
     "write_dashboard": write_dashboard,
     "send_telegram": send_telegram,
+    "draft_broadcast": draft_broadcast,
 }
 
 

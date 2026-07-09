@@ -9,4 +9,5 @@ secrets*
 
 # Generated output
 dashboard.html
+broadcast.html
 __pycache__/
