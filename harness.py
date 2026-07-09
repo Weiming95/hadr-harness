@@ -436,7 +436,10 @@ def _post(url, payload):
 
 
 def call_model(messages: list) -> dict:
-    payload = {"model": MODEL, "messages": messages, "tools": TOOLS, "max_tokens": 2048}
+    # Room for a full turn: the model may emit several tool calls at once
+    # (dashboard events + briefing + a civilian broadcast). Too low a cap
+    # truncates a tool call's JSON arguments mid-string.
+    payload = {"model": MODEL, "messages": messages, "tools": TOOLS, "max_tokens": 4096}
     data = _post(f"{BASE_URL}/chat/completions", payload)
     return data["choices"][0]["message"]
 
@@ -459,8 +462,19 @@ def converse(messages: list, user: str) -> None:
         # Level 3: run each requested tool, feed the result back in.
         for tc in tool_calls:
             name = tc["function"]["name"]
-            args = json.loads(tc["function"].get("arguments") or "{}")
             fn = DISPATCH.get(name)
+            raw = tc["function"].get("arguments") or "{}"
+            try:
+                args = json.loads(raw)
+            except json.JSONDecodeError as ex:
+                # A truncated/invalid arguments blob must not crash the run —
+                # hand the error back so the model can retry with a smaller call.
+                print(f"  [tool] {name}(<unparseable arguments>)")
+                out = (f"tool error: could not parse arguments as JSON ({ex}). They may have "
+                       f"been truncated — call the tool again with a smaller payload.")
+                print(f"    └─ {out[:120]}")
+                messages.append({"role": "tool", "tool_call_id": tc["id"], "content": out})
+                continue
             print(f"  [tool] {name}({json.dumps(args)[:80]})")
             try:
                 out = fn(**args) if fn else f"unknown tool {name}"
