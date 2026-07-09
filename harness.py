@@ -504,6 +504,9 @@ DEFAULT_PROMPT = (
     "Fetch the USGS and GDACS feeds, assess the current worldwide disaster picture, "
     "call write_dashboard to save a morning situation report of the most serious events, "
     "and call send_telegram with a concise plain-text briefing of them. "
+    "If any event is serious enough to warrant public action (e.g. a Red/Orange alert "
+    "over a populated area), also call draft_broadcast with short, actionable civilian "
+    "alerts for that area; if nothing meets that bar, skip the broadcast. "
     "Then give a one-paragraph summary."
 )
 

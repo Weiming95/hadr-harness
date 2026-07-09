@@ -43,7 +43,7 @@ jobs:
           DASHBOARD_URL: https://weiming95.github.io/hadr-harness/
         run: |
           python3 harness.py --once \
-            "Fetch USGS and GDACS, assess the current worldwide disaster picture, call write_dashboard to save a morning situation report of the most serious events, and call send_telegram with a concise plain-text briefing of them. Then summarise in one paragraph."
+            "Fetch USGS and GDACS, assess the current worldwide disaster picture, call write_dashboard to save a morning situation report of the most serious events, and call send_telegram with a concise plain-text briefing of them. If any event is serious enough to warrant public action (e.g. a Red/Orange alert over a populated area), also call draft_broadcast with short, actionable civilian alerts for that area; if nothing meets that bar, skip the broadcast. Then summarise in one paragraph."
 
       - name: Assemble the Pages site
         run: |
@@ -52,6 +52,10 @@ jobs:
             cp dashboard.html site/index.html
           else
             echo "<!doctype html><meta charset=utf-8><title>HADR</title><h1>No briefing produced this run.</h1>" > site/index.html
+          fi
+          # Publish civilian broadcast drafts too, when this run produced any.
+          if [ -f broadcast.html ]; then
+            cp broadcast.html site/broadcast.html
           fi
 
       - name: Upload Pages artifact
